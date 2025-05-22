@@ -1,29 +1,26 @@
 import asyncio
 import aiohttp
-import pandas as pd
-import numpy as np
-import ta
 from aiogram import Bot, Dispatcher, types
 from aiogram.utils import executor
+import pandas as pd
+import ta
 
 API_TOKEN = '7809359933:AAEmozd3svKCGAzXxo5OqifmOhe2aMZL0Gc'
 CHAT_ID = 7098638994
-TOMAN_RATE = 58000
+COINS = [
+    'dogecoin', 'shiba-inu', 'floki', 'pepe', 'dogelon-mars', 'baby-doge-coin',
+    'akita-inu', 'samoyedcoin', 'kishu-inu', 'pitbull', 'doge-killer',
+    'tama', 'mong', 'ladys', 'jejudoge', 'hoge-finance', 'catecoin', 'volt-inu',
+    'kabosu', 'saitama', 'vita-inu', 'dogira', 'yummy', 'elondoge',
+    'bone-shibaswap', 'bonk', 'wojak', 'arbinu', 'feg-token', 'dogpad'
+]
 
 bot = Bot(token=API_TOKEN, parse_mode="Markdown")
 dp = Dispatcher(bot)
 
-MEME_COINS = [
-    'dogecoin', 'shiba-inu', 'pepe', 'floki', 'baby-doge-coin', 'dogelon-mars',
-    'akita-inu', 'kishu-inu', 'pitbull', 'samoyedcoin', 'vitoge', 'cumrocket',
-    'wojak', 'doge-killer', 'catscoin', 'jejudoge', 'mongcoin', 'kabosu', 
-    'poocoin', 'saitama-inu', 'hoge-finance', 'dogira', 'suka', 'doge-ceo', 
-    'pug-ai', 'bonk', 'tosa-inu', 'arbdoge-ai', 'doggy', 'pork', 'turbodoge'
-]
-
 async def fetch_chart(coin_id):
     url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart"
-    params = {"vs_currency": "usd", "days": 7, "interval": "hourly"}
+    params = {"vs_currency": "usd", "days": 3, "interval": "hourly"}
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(url, params=params) as res:
@@ -34,10 +31,10 @@ async def fetch_chart(coin_id):
                 df = pd.DataFrame(prices, columns=["timestamp", "price"])
                 df['price'] = df['price'].astype(float)
                 return df
-    except Exception:
+    except:
         return None
 
-def analyze(df, name):
+def analyze(df):
     df["rsi"] = ta.momentum.RSIIndicator(close=df["price"]).rsi()
     macd = ta.trend.MACD(close=df["price"])
     df["macd"] = macd.macd()
@@ -47,42 +44,47 @@ def analyze(df, name):
     df["bb_lower"] = bb.bollinger_lband()
 
     latest = df.iloc[-1]
+    price = latest["price"]
     rsi = latest["rsi"]
     macd_val = latest["macd"]
     macd_sig = latest["macd_signal"]
-    price = latest["price"]
     bb_upper = latest["bb_upper"]
     bb_lower = latest["bb_lower"]
 
-    msg = f"*{name.upper()}*\nقیمت: {price:.4f} $\n"
-    msg += f"RSI: {rsi:.2f}, MACD: {macd_val:.4f}, سیگنال: {macd_sig:.4f}\n"
-    msg += f"بولینگر: بالا {bb_upper:.4f}, پایین {bb_lower:.4f}\n"
+    msg = f"قیمت: {price:.4f} دلار | RSI: {rsi:.2f} | MACD: {macd_val:.4f} | Signal: {macd_sig:.4f}\n"
+    suggestion = ""
 
     if rsi < 30 and macd_val > macd_sig and price <= bb_lower:
-        msg += "✅ مناسب خرید (احتمال رشد 1 تا 2 روزه)"
+        suggestion = "خرید ✅ (احتمال رشد تا ۲ روز آینده)"
     elif rsi > 70 and macd_val < macd_sig and price >= bb_upper:
-        msg += "❌ مناسب فروش (احتمال افت طی 1 روز)"
+        suggestion = "فروش ❌ (احتمال افت در ۱ روز آینده)"
     else:
-        msg += "⏳ هنوز شرایط مشخصی ندارد"
-    msg += "\n\n"
-    return msg
+        suggestion = "صبر ⏳ (نوسان یا شرایط نامشخص)"
 
-@dp.message_handler(commands=['start'])
-async def start_handler(message: types.Message):
-    await message.reply("در حال تحلیل ۳۰+ میم‌کوین لطفاً منتظر بمانید...")
-    result = ""
-    for coin in MEME_COINS:
+    return msg + " → " + suggestion
+
+@dp.message_handler(commands=["start"])
+async def start_cmd(message: types.Message):
+    await message.reply("در حال تحلیل حدود ۳۰ میم‌کوین محبوب... لطفاً صبر کنید.")
+    results = []
+
+    for coin in COINS:
         df = await fetch_chart(coin)
         if df is not None and len(df) > 50:
-            result += analyze(df, coin)
-    if not result:
-        await message.reply("❌ خطا در دریافت داده از CoinGecko.")
+            analysis = analyze(df)
+            results.append(f"*{coin.upper()}*\n{analysis}\n")
+        await asyncio.sleep(1.2)  # برای جلوگیری از محدودیت کوین‌گکو
+
+    full_message = "\n".join(results)
+    # تقسیم پیام اگه خیلی طولانی بود
+    if len(full_message) < 4000:
+        await bot.send_message(CHAT_ID, full_message)
     else:
-        await bot.send_message(chat_id=message.chat.id, text=result)
+        chunks = [full_message[i:i+4000] for i in range(0, len(full_message), 4000)]
+        for chunk in chunks:
+            await bot.send_message(CHAT_ID, chunk)
 
 if __name__ == "__main__":
     import logging
     logging.basicConfig(level=logging.INFO)
-    loop = asyncio.get_event_loop()
-    loop.create_task(dp.start_polling())
-    loop.run_forever()
+    executor.start_polling(dp, skip_updates=True)
